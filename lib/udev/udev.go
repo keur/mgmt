@@ -1,4 +1,4 @@
-package lib
+package udev
 
 import (
 	"fmt"
@@ -17,10 +17,10 @@ import (
 const NetlinkKObjectUEvent = 15
 
 
-// shutdown closes the event file descriptor and unblocks receive by sending
+// Shutdown closes the event file descriptor and unblocks receive by sending
 // a message to the pipe file descriptor. It must be called before close, and
 // should only be called once.
-func (obj *socketSet) shutdown() error {
+func (obj *SocketSet) Shutdown() error {
 	// close the event socket so no more events are produced
 	if err := unix.Close(obj.fdEvents); err != nil {
 		return err
@@ -31,17 +31,17 @@ func (obj *socketSet) shutdown() error {
 	})
 }
 
-// close closes the pipe file descriptor. It must only be called after
+// Close closes the pipe file descriptor. It must only be called after
 // shutdown has closed fdEvents, and unblocked receive. It should only be
 // called once.
-func (obj *socketSet) close() error {
+func (obj *SocketSet) Close() error {
 	return unix.Close(obj.fdPipe)
 }
 
-// receive waits for bytes from fdEvents and parses them into a slice of
+// ReceiveBytes waits for bytes from fdEvents and parses them into a slice of
 // netlink messages. It will block until an event is produced, or shutdown
 // is called.
-func (obj *socketSet) receiveBytes() ([]byte, error) {
+func (obj *SocketSet) ReceiveBytes() ([]byte, error) {
 	// Select will return when any fd in fdSet (fdEvents and fdPipe) is ready
 	// to read.
 	_, err := unix.Select(obj.nfd(), obj.fdSet(), nil, nil, nil)
@@ -70,9 +70,9 @@ func (obj *socketSet) receiveBytes() ([]byte, error) {
 	return b, nil
 }
 
-// receiveParsed is a wrapper around receiveBytes that returns a NetlinkMessage.
-func (obj *socketSet) receiveParsed() ([]syscall.NetlinkMessage, error) {
-	msgBytes, err := obj.receiveBytes()
+// ReceiveParsedNetlink is a wrapper around ReceiveBytes that returns a NetlinkMessage.
+func (obj *SocketSet) ReceiveParsedNetlink() ([]syscall.NetlinkMessage, error) {
+	msgBytes, err := obj.ReceiveBytes()
 	if err != nil {
 		return nil, err
 	}
@@ -91,13 +91,13 @@ type UEvent struct {
 	Data      map[string]string
 }
 
-// receiveUEvent is a wrapper around receiveBytes that returns a UEvent
-func (obj *socketSet) receiveUEvent() (*UEvent, error) {
+// ReceiveUEvent is a wrapper around ReceiveBytes that returns a UEvent
+func (obj *SocketSet) ReceiveUEvent() (*UEvent, error) {
 
 	// TODO: can multiple events come in the same socket
 	event := &UEvent{Data: map[string]string{}}
 
-	msgBytes, err := obj.receiveBytes()
+	msgBytes, err := obj.ReceiveBytes()
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +135,7 @@ func (obj *socketSet) receiveUEvent() (*UEvent, error) {
 // nfd returns one more than the highest fd value in the struct, for use as as
 // the nfds parameter in select. It represents the file descriptor set maximum
 // size. See man select for more info.
-func (obj *socketSet) nfd() int {
+func (obj *SocketSet) nfd() int {
 	if obj.fdEvents > obj.fdPipe {
 		return obj.fdEvents + 1
 	}
@@ -144,9 +144,9 @@ func (obj *socketSet) nfd() int {
 
 // fdSet returns a bitmask representation of the integer values of fdEvents
 // and fdPipe. See man select for more info.
-func (obj *socketSet) fdSet() *unix.FdSet {
+func (obj *SocketSet) fdSet() *unix.FdSet {
 	fdSet := &unix.FdSet{}
-	// Generate the bitmask representing the file descriptors in the socketSet.
+	// Generate the bitmask representing the file descriptors in the SocketSet.
 	// The rightmost bit corresponds to file descriptor zero, and each bit to
 	// the left represents the next file descriptor number in the sequence of
 	// all real numbers. E.g. the FdSet containing containing 0 and 4 is 10001.
@@ -157,14 +157,14 @@ func (obj *socketSet) fdSet() *unix.FdSet {
 
 // udev does stuff
 func udev() (error) {
-	ss, err := eventSocketSet(1, "dank.sock")
+	ss, err := EventSocketSet(1, "dank.sock")
 	if err != nil {
 		return errwrap.Wrapf(err, "error creating socket set")
 	}
-	defer ss.close()
-	defer ss.shutdown()
+	defer ss.Close()
+	defer ss.Shutdown()
 	for {
-		event, err := ss.receiveUEvent()
+		event, err := ss.ReceiveUEvent()
 		if err != nil {
 			return errwrap.Wrapf(err, "error receiving uevent data")
 		}
@@ -176,16 +176,16 @@ func udev() (error) {
 }
 
 
-// socketSet is used to receive events from a socket and shut it down cleanly
+// SocketSet is used to receive events from a socket and shut it down cleanly
 // when asked. It contains a socket for events and a pipe socket to unblock
 // receive on shutdown.
-type socketSet struct {
+type SocketSet struct {
 	fdEvents int
 	fdPipe   int
 	pipeFile string
 }
 
-func eventSocketSet(groups uint32, name string) (*socketSet, error) {
+func EventSocketSet(groups uint32, name string) (*SocketSet, error) {
 	fdEvents, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_KOBJECT_UEVENT)
 	if err != nil {
 		return nil, errwrap.Wrapf(err, "error creating netlink socket")
@@ -211,7 +211,7 @@ func eventSocketSet(groups uint32, name string) (*socketSet, error) {
 		return nil, errwrap.Wrapf(err, "error binding pipe socket")
 	}
 
-	return &socketSet{
+	return &SocketSet{
 		fdEvents: fdEvents,
 		fdPipe:   fdPipe,
 		pipeFile: name,

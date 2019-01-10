@@ -4,12 +4,20 @@ import (
 	"fmt"
 	"github.com/purpleidea/mgmt/lang/funcs/facts"
 	"github.com/purpleidea/mgmt/lang/types"
-	"os"
 	"strings"
 	"strconv"
 	"io/ioutil"
+	"regexp"
+
+	errwrap "github.com/pkg/errors"
+	netlink "github.com/purpleidea/mgmt/lib/udev"
 )
 
+const (
+	rtmGrps = 0x1 // make me a multicast reciever
+	socketFile = "pipe.sock"
+	cpuDevpathRegex = "/devices/system/cpu/cpu[0-9]"
+)
 
 // CPUCountFact is a fact that returns the current CPU count
 type CPUCountFact struct {
@@ -30,22 +38,60 @@ func (obj *CPUCountFact) Init(init *facts.Init) error {
 }
 
 func (obj CPUCountFact) Stream() error {
-	startChan := make(chan struct{})
-	close(startChan)
+	defer close(obj.init.Output) // Signal when we're done
 
+	ss, err := netlink.EventSocketSet(rtmGrps, socketFile)
+	if err != nil {
+		return errwrap.Wrapf(err, "error creating socket set")
+	}
+	defer ss.Close()
+	defer ss.Shutdown()
+
+	eventChan := make(chan *netlink.UEvent) // updated when we receive uevent
+
+	// Start waiting for kernel to poke us about new
+	// device changes on the system
+	go func() error {
+		for {
+			event, err := ss.ReceiveUEvent()
+			if err != nil {
+				// TODO: log here instead?
+				return errwrap.Wrapf(err, "error receiving uevent data")
+			}
+			// pass the new event
+			eventChan <- event
+		}
+		return nil
+	}()
+
+	startChan := make(chan struct{})
+	close(startChan) // trigger the first event
 	for {
+		var cpuCount int64 // NOTE: gets set to 0
 		select {
 		case <- startChan:
 			startChan = nil // disable
-			_, err := os.Open("/proc/cpuinfo") // TODO: fix
 			fmt.Println("polling cpuinfo")
-			cpuCount, err := getCPUCountProc()
+			cpuCount, _ = initCPUCount()
 			if err != nil {
 				// TODO: log?
 				cpuCount = 0
 			}
 			obj.init.Output <- &types.IntValue{
 				V: cpuCount,
+			}
+		case <- obj.closeChan:
+			return nil
+		}
+		select {
+		case event := <- eventChan:
+			fmt.Println("udev reports cpu change")
+			cpus, cpuEvent := processUdev(event)
+			if cpuEvent {
+				cpuCount += cpus
+				obj.init.Output <- &types.IntValue {
+					V: cpuCount,
+				}
 			}
 		case <- obj.closeChan:
 			return nil
@@ -65,26 +111,50 @@ func (obj *CPUCountFact) Close() error {
 	return nil
 }
 
-func getCPUCountProc() (int64, error) {
-	dat, err := ioutil.ReadFile("/proc/cpuinfo")
+// initCPUCount looks in procfs to get the number of CPUs.
+// This is just for initializing the fact, and should not be polled.
+func initCPUCount() (int64, error) {
+	var count int64
+	dat, err := ioutil.ReadFile("/sys/devices/system/cpu/present") // TODO: change this to online?
 	if err != nil {
-		return -1, err
+		return 0, err
 	}
 
-
-	for _, line := range strings.Split(string(dat), "\n") {
-		if strings.HasPrefix(line, "cpu cores") {
-			s := strings.Split(line, ":")
-			if len(s) != 2 {
-				return 0, nil
-			}
-			cpus := strings.Trim(s[1], " ")
-			cpusInt, err := strconv.ParseInt(cpus, 10, 64)
+	for _, line := range strings.Split(string(dat), ",") {
+		cpuRange := strings.SplitN(line, "-", 2)
+		if len(cpuRange) == 1 {
+			count++
+		} else if len(cpuRange) == 2 {
+			lo, err := strconv.ParseInt(cpuRange[0], 10, 64)
 			if err != nil {
-				return 0, nil
+				return 0, err
 			}
-			return cpusInt, nil
+			hi, err := strconv.ParseInt(strings.TrimRight(cpuRange[1], "\n"), 10, 64)
+			if err != nil {
+				return 0, err
+			}
+			count += hi - lo  + 1
 		}
 	}
-	return 0, nil
+	return count, nil
+}
+
+func processUdev(event *netlink.UEvent) (int64, bool) {
+	if event.Subsystem != "cpu" {
+		return 0, false
+	}
+	// is this a valid cpu path in sysfs?
+	m, err := regexp.MatchString(cpuDevpathRegex, event.Devpath)
+	if !m || err != nil {
+		// TODO: log error?
+		return 0, false
+	}
+	// TODO: check for ONLINE and OFFLINE?
+	if event.Action == "ADD" {
+		return 1, true
+	} else if event.Action == "Remove" {
+		return -1, true
+	} else {
+		return 0, false
+	}
 }

@@ -25,22 +25,24 @@ func TestSimple(t *testing.T) {
 
 	// Set up the go function
 	go func() {
+		defer fact.Close()
+		count := 0
+	Loop:
 		for {
 			select {
-			case count := <- output:
-				fmt.Println(count)
-				break
+			case cpus := <- output:
+				fmt.Println(cpus.Int())
+				count++
+				if count > 0 {
+					break Loop
+				}
 			}
 		}
 	}()
+
 	// Now start the stream
-	fact.Stream()
-
-
-	err = fact.Close()
+	err = fact.Stream()
 	if err != nil {
-		t.Errorf("Could not close CPUCountFact")
-		return
+		t.Error(err)
 	}
-
 }
