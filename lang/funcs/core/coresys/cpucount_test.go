@@ -31,9 +31,9 @@ func TestSimple(t *testing.T) {
 		for {
 			select {
 			case cpus := <- output:
-				fmt.Println(cpus.Int())
+                fmt.Printf("CPUS: %d\n", cpus.Int())
 				count++
-				if count > 0 {
+				if count > 3 {
 					break Loop
 				}
 			}

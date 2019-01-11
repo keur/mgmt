@@ -12,10 +12,6 @@ import (
 	errwrap "github.com/pkg/errors"
 )
 
-// NetlinkKObjectUEvent sends messages from the kernel to userspace.
-// See more: /usr/include/linux/netlink.h
-const NetlinkKObjectUEvent = 15
-
 
 // Shutdown closes the event file descriptor and unblocks receive by sending
 // a message to the pipe file descriptor. It must be called before close, and
@@ -35,6 +31,9 @@ func (obj *SocketSet) Shutdown() error {
 // shutdown has closed fdEvents, and unblocked receive. It should only be
 // called once.
 func (obj *SocketSet) Close() error {
+	if err := unix.Unlink(obj.pipeFile); err != nil {
+		return errwrap.Wrapf(err, "could not unbind %s", obj.pipeFile)
+	}
 	return unix.Close(obj.fdPipe)
 }
 
@@ -93,8 +92,7 @@ type UEvent struct {
 
 // ReceiveUEvent is a wrapper around ReceiveBytes that returns a UEvent
 func (obj *SocketSet) ReceiveUEvent() (*UEvent, error) {
-
-	// TODO: can multiple events come in the same socket
+	// TODO: can multiple events come in the same socket?
 	event := &UEvent{Data: map[string]string{}}
 
 	msgBytes, err := obj.ReceiveBytes()
@@ -104,11 +102,12 @@ func (obj *SocketSet) ReceiveUEvent() (*UEvent, error) {
 
 	submsg := msgBytes[:]
 	i := 0
+Loop:
 	for {
 		submsg = submsg[i:]
 		n := bytes.IndexByte(submsg, 0x0)
 		if n == -1 {
-			break
+			break Loop
 		}
 		i = n + 1
 
@@ -155,27 +154,6 @@ func (obj *SocketSet) fdSet() *unix.FdSet {
 	return fdSet
 }
 
-// udev does stuff
-func udev() (error) {
-	ss, err := EventSocketSet(1, "dank.sock")
-	if err != nil {
-		return errwrap.Wrapf(err, "error creating socket set")
-	}
-	defer ss.Close()
-	defer ss.Shutdown()
-	for {
-		event, err := ss.ReceiveUEvent()
-		if err != nil {
-			return errwrap.Wrapf(err, "error receiving uevent data")
-		}
-		fmt.Printf("ACTION: %s\n", event.Action)
-		fmt.Printf("DEVPATH: %s\n", event.Devpath)
-		fmt.Printf("SUBSYSTEM: %s\n", event.Subsystem)
-	}
-	return nil
-}
-
-
 // SocketSet is used to receive events from a socket and shut it down cleanly
 // when asked. It contains a socket for events and a pipe socket to unblock
 // receive on shutdown.
@@ -204,6 +182,11 @@ func EventSocketSet(groups uint32, name string) (*SocketSet, error) {
 	if err != nil {
 		return nil, errwrap.Wrapf(err, "error creating pipe socket")
 	}
+
+	// Delete the socket file when the program ends
+	//if err = unix.Unlink(name); err != nil {
+	//	return nil, errwrap.Wrapf(err, "could not unlink socket")
+	//}
 
 	if err = unix.Bind(fdPipe, &unix.SockaddrUnix{
 		Name: name,

@@ -40,52 +40,62 @@ func (obj *CPUCountFact) Init(init *facts.Init) error {
 func (obj CPUCountFact) Stream() error {
 	defer close(obj.init.Output) // Signal when we're done
 
+
+	// TODO: move all the socketset stuff to goroutine
 	ss, err := netlink.EventSocketSet(rtmGrps, socketFile)
 	if err != nil {
 		return errwrap.Wrapf(err, "error creating socket set")
 	}
-	defer ss.Close()
-	defer ss.Shutdown()
 
 	eventChan := make(chan *netlink.UEvent) // updated when we receive uevent
+	defer close(eventChan)
 
 	// Start waiting for kernel to poke us about new
 	// device changes on the system
-	go func() error {
+	go func() {
+		defer ss.Shutdown()
+		defer ss.Close()
 		for {
-			event, err := ss.ReceiveUEvent()
-			if err != nil {
-				// TODO: log here instead?
-				return errwrap.Wrapf(err, "error receiving uevent data")
-			}
+			//fmt.Println("go func")
+			event, _ := ss.ReceiveUEvent()
+			//fmt.Printf("Sending %s\n", event.Data["SEQNUM"])
+			// TODO: use struct with error field
 			// pass the new event
-			eventChan <- event
+			// TODO: this is a broken select
+			select {
+			case eventChan <- event:
+			default: // don't block
+			}
 		}
-		return nil
 	}()
 
 	startChan := make(chan struct{})
 	close(startChan) // trigger the first event
-	for {
-		var cpuCount int64 // NOTE: gets set to 0
-		select {
-		case <- startChan:
-			startChan = nil // disable
-			fmt.Println("polling cpuinfo")
-			cpuCount, _ = initCPUCount()
-			if err != nil {
-				// TODO: log?
-				cpuCount = 0
-			}
-			obj.init.Output <- &types.IntValue{
-				V: cpuCount,
-			}
-		case <- obj.closeChan:
-			return nil
+	var cpuCount int64 // NOTE: gets set to 0
+	select {
+	case <- startChan:
+		startChan = nil // disable
+		fmt.Println("polling cpuinfo")
+		cpuCount, _ = initCPUCount()
+		if err != nil {
+			// TODO: log?
+			cpuCount = 0
 		}
+		obj.init.Output <- &types.IntValue{
+			V: cpuCount,
+		}
+		break
+	case <- obj.closeChan:
+		return nil
+	}
+
+	for {
 		select {
-		case event := <- eventChan:
-			fmt.Println("udev reports cpu change")
+		case event, ok := <- eventChan:
+			if !ok {
+				return nil
+			}
+			//fmt.Printf("Receiving %s\n", event.Data["SEQNUM"])
 			cpus, cpuEvent := processUdev(event)
 			if cpuEvent {
 				cpuCount += cpus
@@ -150,9 +160,9 @@ func processUdev(event *netlink.UEvent) (int64, bool) {
 		return 0, false
 	}
 	// TODO: check for ONLINE and OFFLINE?
-	if event.Action == "ADD" {
+	if event.Action == "add" {
 		return 1, true
-	} else if event.Action == "Remove" {
+	} else if event.Action == "remove" {
 		return -1, true
 	} else {
 		return 0, false
