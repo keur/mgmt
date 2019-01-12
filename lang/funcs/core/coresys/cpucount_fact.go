@@ -9,9 +9,10 @@ import (
 	"io/ioutil"
 	"regexp"
 
+	"github.com/purpleidea/mgmt/lib/socketset"
 	"golang.org/x/sys/unix"
+
 	errwrap "github.com/pkg/errors"
-	netlink "github.com/purpleidea/mgmt/lib/udev"
 )
 
 const (
@@ -43,12 +44,12 @@ func (obj CPUCountFact) Stream() error {
 
 
 	// TODO: move all the socketset stuff to goroutine
-	ss, err := netlink.NewSocketSet(rtmGrps, socketFile, unix.NETLINK_KOBJECT_UEVENT)
+	ss, err := socketset.NewSocketSet(rtmGrps, socketFile, unix.NETLINK_KOBJECT_UEVENT)
 	if err != nil {
 		return errwrap.Wrapf(err, "error creating socket set")
 	}
 
-	eventChan := make(chan *netlink.UEvent) // updated when we receive uevent
+	eventChan := make(chan *socketset.UEvent) // updated when we receive uevent
 	defer close(eventChan)
 
 	// Start waiting for kernel to poke us about new
@@ -150,7 +151,7 @@ func initCPUCount() (int64, error) {
 	return count, nil
 }
 
-func processUdev(event *netlink.UEvent) (int64, bool) {
+func processUdev(event *socketset.UEvent) (int64, bool) {
 	if event.Subsystem != "cpu" {
 		return 0, false
 	}

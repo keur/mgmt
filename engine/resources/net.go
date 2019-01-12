@@ -35,7 +35,7 @@ import (
 	"github.com/purpleidea/mgmt/recwatch"
 	"github.com/purpleidea/mgmt/util"
 
-	nl "github.com/purpleidea/mgmt/lib/udev"
+	"github.com/purpleidea/mgmt/lib/socketset"
 	multierr "github.com/hashicorp/go-multierror"
 	errwrap "github.com/pkg/errors"
 	// XXX: Do NOT use subscribe methods from this lib, as they are racey and
@@ -196,7 +196,7 @@ func (obj *NetRes) Watch() error {
 	defer wg.Wait()
 
 	// create a netlink socket for receiving network interface events
-	conn, err := nl.NewSocketSet(rtmGrps, obj.socketFile, unix.NETLINK_ROUTE)
+	conn, err := socketset.NewSocketSet(rtmGrps, obj.socketFile, unix.NETLINK_ROUTE)
 	if err != nil {
 		return errwrap.Wrapf(err, "error creating socket set")
 	}

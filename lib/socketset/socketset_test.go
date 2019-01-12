@@ -1,5 +1,5 @@
 
-package udev
+package socketset
 
 import (
 	"testing"
