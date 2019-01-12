@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"regexp"
 
+	"golang.org/x/sys/unix"
 	errwrap "github.com/pkg/errors"
 	netlink "github.com/purpleidea/mgmt/lib/udev"
 )
@@ -42,7 +43,7 @@ func (obj CPUCountFact) Stream() error {
 
 
 	// TODO: move all the socketset stuff to goroutine
-	ss, err := netlink.EventSocketSet(rtmGrps, socketFile)
+	ss, err := netlink.NewSocketSet(rtmGrps, socketFile, unix.NETLINK_KOBJECT_UEVENT)
 	if err != nil {
 		return errwrap.Wrapf(err, "error creating socket set")
 	}

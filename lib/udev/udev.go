@@ -69,8 +69,8 @@ func (obj *SocketSet) ReceiveBytes() ([]byte, error) {
 	return b, nil
 }
 
-// ReceiveParsedNetlink is a wrapper around ReceiveBytes that returns a NetlinkMessage.
-func (obj *SocketSet) ReceiveParsedNetlink() ([]syscall.NetlinkMessage, error) {
+// ReceiveNetlinkMessages is a wrapper around ReceiveBytes that returns a NetlinkMessage.
+func (obj *SocketSet) ReceiveNetlinkMessages() ([]syscall.NetlinkMessage, error) {
 	msgBytes, err := obj.ReceiveBytes()
 	if err != nil {
 		return nil, err
@@ -163,8 +163,9 @@ type SocketSet struct {
 	pipeFile string
 }
 
-func EventSocketSet(groups uint32, name string) (*SocketSet, error) {
-	fdEvents, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, unix.NETLINK_KOBJECT_UEVENT)
+// NewSocketSet returns a socketSet, initialized with the given parameters.
+func NewSocketSet(groups uint32, name string, proto int) (*SocketSet, error) {
+	fdEvents, err := unix.Socket(unix.AF_NETLINK, unix.SOCK_RAW, proto)
 	if err != nil {
 		return nil, errwrap.Wrapf(err, "error creating netlink socket")
 	}
@@ -183,11 +184,7 @@ func EventSocketSet(groups uint32, name string) (*SocketSet, error) {
 		return nil, errwrap.Wrapf(err, "error creating pipe socket")
 	}
 
-	// Delete the socket file when the program ends
-	//if err = unix.Unlink(name); err != nil {
-	//	return nil, errwrap.Wrapf(err, "could not unlink socket")
-	//}
-
+	// bind the pipe to a file
 	if err = unix.Bind(fdPipe, &unix.SockaddrUnix{
 		Name: name,
 	}); err != nil {
