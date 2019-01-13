@@ -18,12 +18,13 @@
 package coresys
 
 import (
-	"github.com/purpleidea/mgmt/lang/funcs/facts"
-	"github.com/purpleidea/mgmt/lang/types"
-	"strings"
-	"strconv"
 	"io/ioutil"
 	"regexp"
+	"strconv"
+	"strings"
+
+	"github.com/purpleidea/mgmt/lang/funcs/facts"
+	"github.com/purpleidea/mgmt/lang/types"
 
 	"github.com/purpleidea/mgmt/lib/socketset"
 	"golang.org/x/sys/unix"
@@ -32,8 +33,8 @@ import (
 )
 
 const (
-	rtmGrps = 0x1 // make me a multicast reciever
-	socketFile = "pipe.sock"
+	rtmGrps         = 0x1 // make me a multicast reciever
+	socketFile      = "pipe.sock"
 	cpuDevpathRegex = "/devices/system/cpu/cpu[0-9]"
 )
 
@@ -43,11 +44,9 @@ type CPUCountFact struct {
 	closeChan chan struct{}
 }
 
-
 func init() {
 	facts.ModuleRegister(moduleName, "cpu_count", func() facts.Fact { return &CPUCountFact{} }) // must register the fact and name
 }
-
 
 // Init run startup code for this fact. Initializes the closeChan
 // and sets the facts.Init variable
@@ -88,7 +87,7 @@ func (obj CPUCountFact) Stream() error {
 			select {
 			case eventChan <- &nlChanEvent{
 				uevent: uevent,
-				err: err,
+				err:    err,
 			}:
 			default: // don't block
 			}
@@ -99,7 +98,7 @@ func (obj CPUCountFact) Stream() error {
 	close(startChan) // trigger the first event
 	var cpuCount int64
 	select {
-	case <- startChan:
+	case <-startChan:
 		startChan = nil // disable
 		cpuCount, _ = initCPUCount()
 		if err != nil {
@@ -110,13 +109,13 @@ func (obj CPUCountFact) Stream() error {
 			V: cpuCount,
 		}
 		break
-	case <- obj.closeChan:
+	case <-obj.closeChan:
 		return nil
 	}
 
 	for {
 		select {
-		case event, ok := <- eventChan:
+		case event, ok := <-eventChan:
 			if !ok {
 				continue
 			}
@@ -128,11 +127,11 @@ func (obj CPUCountFact) Stream() error {
 			cpus, cpuEvent := processUdev(event.uevent)
 			if cpuEvent {
 				cpuCount += cpus
-				obj.init.Output <- &types.IntValue {
+				obj.init.Output <- &types.IntValue{
 					V: cpuCount,
 				}
 			}
-		case <- obj.closeChan:
+		case <-obj.closeChan:
 			return nil
 		}
 	}
@@ -173,7 +172,7 @@ func initCPUCount() (int64, error) {
 			if err != nil {
 				return 0, err
 			}
-			count += hi - lo  + 1
+			count += hi - lo + 1
 		}
 	}
 	return count, nil

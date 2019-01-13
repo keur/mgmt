@@ -35,9 +35,9 @@ import (
 	"github.com/purpleidea/mgmt/recwatch"
 	"github.com/purpleidea/mgmt/util"
 
-	"github.com/purpleidea/mgmt/lib/socketset"
 	multierr "github.com/hashicorp/go-multierror"
 	errwrap "github.com/pkg/errors"
+	"github.com/purpleidea/mgmt/lib/socketset"
 	// XXX: Do NOT use subscribe methods from this lib, as they are racey and
 	// do not clean up spawned goroutines. Should be replaced when a suitable
 	// alternative is available.

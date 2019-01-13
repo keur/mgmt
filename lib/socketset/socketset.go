@@ -20,17 +20,17 @@
 package socketset
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"path"
-	"golang.org/x/sys/unix"
-	"bytes"
 	"strings"
 	"syscall"
 
+	"golang.org/x/sys/unix"
+
 	errwrap "github.com/pkg/errors"
 )
-
 
 // Shutdown closes the event file descriptor and unblocks receive by sending
 // a message to the pipe file descriptor. It must be called before close, and
@@ -106,7 +106,7 @@ type UEvent struct {
 	Subsystem string
 
 	// Every other KV pair
-	Data      map[string]string
+	Data map[string]string
 }
 
 // ReceiveUEvent is a wrapper around ReceiveBytes that returns a UEvent
@@ -192,7 +192,7 @@ func NewSocketSet(groups uint32, name string, proto int) (*SocketSet, error) {
 	if err := unix.Bind(fdEvents, &unix.SockaddrNetlink{
 		Family: unix.AF_NETLINK,
 		Groups: groups,
-		Pid: uint32(os.Getpid()),
+		Pid:    uint32(os.Getpid()),
 	}); err != nil {
 		return nil, errwrap.Wrapf(err, "error binding netlink socket")
 	}
