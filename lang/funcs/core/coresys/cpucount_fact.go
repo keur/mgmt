@@ -1,3 +1,20 @@
+// Mgmt
+// Copyright (C) 2013-2018+ James Shubin and the project contributors
+// Written by James Shubin <james@shubin.ca> and the project contributors
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 package coresys
 
 import (
@@ -33,17 +50,20 @@ func init() {
 }
 
 
+// Init run startup code for this fact. Initializes the closeChan
+// and sets the facts.Init variable
 func (obj *CPUCountFact) Init(init *facts.Init) error {
 	obj.init = init
 	obj.closeChan = make(chan struct{})
 	return nil
 }
 
+// Stream returns the changing values that this fact has over time.
+// It will first poll sysfs to get the initial cpu count, and then
+// receieves UEvents from the kernel as CPUs are added/removed.
 func (obj CPUCountFact) Stream() error {
 	defer close(obj.init.Output) // Signal when we're done
 
-
-	// TODO: move all the socketset stuff to goroutine
 	ss, err := socketset.NewSocketSet(rtmGrps, socketFile, unix.NETLINK_KOBJECT_UEVENT)
 	if err != nil {
 		return errwrap.Wrapf(err, "error creating socket set")
@@ -58,12 +78,9 @@ func (obj CPUCountFact) Stream() error {
 		defer ss.Shutdown()
 		defer ss.Close()
 		for {
-			//fmt.Println("go func")
 			event, _ := ss.ReceiveUEvent()
 			//fmt.Printf("Sending %s\n", event.Data["SEQNUM"])
 			// TODO: use struct with error field
-			// pass the new event
-			// TODO: this is a broken select
 			select {
 			case eventChan <- event:
 			default: // don't block
@@ -73,7 +90,7 @@ func (obj CPUCountFact) Stream() error {
 
 	startChan := make(chan struct{})
 	close(startChan) // trigger the first event
-	var cpuCount int64 // NOTE: gets set to 0
+	var cpuCount int64
 	select {
 	case <- startChan:
 		startChan = nil // disable
@@ -118,6 +135,7 @@ func (obj *CPUCountFact) Info() *facts.Info {
 	}
 }
 
+// Close runs cleanup code for the fact and turns off the Stream.
 func (obj *CPUCountFact) Close() error {
 	close(obj.closeChan)
 	return nil
@@ -151,6 +169,9 @@ func initCPUCount() (int64, error) {
 	return count, nil
 }
 
+// When we receieve a udev event, we filter only those that
+// indicate a CPU is being added or removed.
+// TODO: instead of checking for added/removed CPUS, check for online/offline?
 func processUdev(event *socketset.UEvent) (int64, bool) {
 	if event.Subsystem != "cpu" {
 		return 0, false
@@ -161,7 +182,6 @@ func processUdev(event *socketset.UEvent) (int64, bool) {
 		// TODO: log error?
 		return 0, false
 	}
-	// TODO: check for ONLINE and OFFLINE?
 	if event.Action == "add" {
 		return 1, true
 	} else if event.Action == "remove" {
