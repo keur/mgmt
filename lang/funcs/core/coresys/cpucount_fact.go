@@ -18,7 +18,6 @@
 package coresys
 
 import (
-	"fmt"
 	"github.com/purpleidea/mgmt/lang/funcs/facts"
 	"github.com/purpleidea/mgmt/lang/types"
 	"strings"
@@ -58,6 +57,11 @@ func (obj *CPUCountFact) Init(init *facts.Init) error {
 	return nil
 }
 
+type nlChanEvent struct {
+	uevent *socketset.UEvent
+	err    error
+}
+
 // Stream returns the changing values that this fact has over time.
 // It will first poll sysfs to get the initial cpu count, and then
 // receieves UEvents from the kernel as CPUs are added/removed.
@@ -69,7 +73,7 @@ func (obj CPUCountFact) Stream() error {
 		return errwrap.Wrapf(err, "error creating socket set")
 	}
 
-	eventChan := make(chan *socketset.UEvent) // updated when we receive uevent
+	eventChan := make(chan *nlChanEvent) // updated when we receive uevent
 	defer close(eventChan)
 
 	// Start waiting for kernel to poke us about new
@@ -78,11 +82,14 @@ func (obj CPUCountFact) Stream() error {
 		defer ss.Shutdown()
 		defer ss.Close()
 		for {
-			event, _ := ss.ReceiveUEvent()
+			uevent, err := ss.ReceiveUEvent()
 			//fmt.Printf("Sending %s\n", event.Data["SEQNUM"])
 			// TODO: use struct with error field
 			select {
-			case eventChan <- event:
+			case eventChan <- &nlChanEvent{
+				uevent: uevent,
+				err: err,
+			}:
 			default: // don't block
 			}
 		}
@@ -94,7 +101,6 @@ func (obj CPUCountFact) Stream() error {
 	select {
 	case <- startChan:
 		startChan = nil // disable
-		fmt.Println("polling cpuinfo")
 		cpuCount, _ = initCPUCount()
 		if err != nil {
 			// TODO: log?
@@ -112,10 +118,14 @@ func (obj CPUCountFact) Stream() error {
 		select {
 		case event, ok := <- eventChan:
 			if !ok {
-				return nil
+				continue
+			}
+			if event.err != nil {
+				// TODO: log here instead?
+				return errwrap.Wrapf(event.err, "error receiving uevent")
 			}
 			//fmt.Printf("Receiving %s\n", event.Data["SEQNUM"])
-			cpus, cpuEvent := processUdev(event)
+			cpus, cpuEvent := processUdev(event.uevent)
 			if cpuEvent {
 				cpuCount += cpus
 				obj.init.Output <- &types.IntValue {
